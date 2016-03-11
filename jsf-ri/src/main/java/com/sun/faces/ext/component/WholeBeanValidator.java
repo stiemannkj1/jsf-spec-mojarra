@@ -36,7 +36,6 @@
  * and therefore, elected the GPL Version 2 license, then the option applies
  * only if the new code is made subject to such option by the copyright
  * holder.
-
  */
 
 package com.sun.faces.ext.component;
@@ -62,49 +61,82 @@ import javax.faces.validator.BeanValidator;
 import javax.faces.validator.Validator;
 import javax.faces.validator.ValidatorException;
 import javax.validation.ConstraintViolation;
-import javax.validation.MessageInterpolator; 
+import javax.validation.MessageInterpolator;
 import javax.validation.Validation;
 import javax.validation.ValidationException;
 import javax.validation.ValidatorContext;
 import javax.validation.ValidatorFactory;
 
-import static com.sun.faces.ext.component.MultiFieldValidationUtils.FAILED_FIELD_LEVEL_VALIDATION;
+import static com.sun.faces.ext.component.MultiFieldValidationUtils2.AddRemainingCandidateFieldsCallback;
+import static com.sun.faces.ext.component.MultiFieldValidationUtils2.FAILED_FIELD_LEVEL_VALIDATION;
 import javax.faces.component.EditableValueHolder;
-
+import javax.faces.component.UIForm;
+import javax.faces.component.visit.VisitContext;
 
 class WholeBeanValidator implements Validator {
-    private static final Logger LOGGER =
-         Logger.getLogger("javax.faces.validator", "javax.faces.LogStrings");
+
+    private static final Logger LOGGER
+            = Logger.getLogger("javax.faces.validator", "javax.faces.LogStrings");
+
+    private static final String ERROR_MISSING_FORM
+            = "f:validateWholeBean must be nested directly in an UIForm.";
 
     @Override
     public void validate(FacesContext context, UIComponent c, Object value) throws ValidatorException {
+        
+        // check if the parent of this f:validateWholeBean is a form                  
+        UIComponent parent = c.getParent();
+        if (!(parent instanceof UIForm)) {
+            throw new IllegalArgumentException(ERROR_MISSING_FORM);
+        }
+
+        UIForm form = (UIForm) parent;
+
         ValueExpression beanVE = c.getValueExpression("value");
         if (null == beanVE) {
             throw new FacesException("The \"value\" attribute is required");
         }
-        Object val = beanVE.getValue(context.getELContext());
-        
+        Object val = beanVE.getValue(context.getELContext());        
         // Inspect the status of field level validation
-        Map<Object, Map<String, Map<String, Object>>> candidates = MultiFieldValidationUtils.getMultiFieldValidationCandidates(context, false);
-        if (candidates.isEmpty() || !candidates.containsKey(val)) {
+        Map<Object, Map<String, Map<String, Object>>> candidates = MultiFieldValidationUtils.getMultiFieldValidationCandidates(context, false);        
+
+        /* this should be removed or commented
+         if (candidates.isEmpty() || !candidates.containsKey(val)) {
+         return;
+         }
+         */               
+        
+        if(context.isValidationFailed()){
             return;
         }
-        Map<String, Map<String, Object>> candidate = candidates.get(val);
-        // Verify that none of the field level properties failed validation
-        for (Map.Entry<String, Map<String, Object>> cur : candidate.entrySet()) {
-            if (FAILED_FIELD_LEVEL_VALIDATION.equals(cur.getValue().get("value"))) { // NOPMD
-                return;
-            }
-        }
         
+        Map<String, Map<String, Object>> candidate = null;
+        if ((!candidates.isEmpty()) && (candidates.containsKey(val))) {
+            candidate = candidates.get(val);
+            // Verify that none of the field level properties failed validation
+            for (Map.Entry<String, Map<String, Object>> cur : candidate.entrySet()) {
+                if (FAILED_FIELD_LEVEL_VALIDATION.equals(cur.getValue().get("value"))) { // NOPMD
+                    return;
+                }
+            }
+        }       
+
+        AddRemainingCandidateFieldsCallback addRemainingCandidateFieldsCallback = new AddRemainingCandidateFieldsCallback(context, val);
+        form.visitTree(VisitContext.createVisitContext(context), addRemainingCandidateFieldsCallback);
+        candidate = addRemainingCandidateFieldsCallback.getCandidate();
+        
+        if(candidate.isEmpty()){
+            return;
+        }
+         
         Object valCopy = copyObjectAndPopulateWithCandidateValues(beanVE, val, candidate);
         javax.validation.Validator beanValidator = getBeanValidator(context);
         UIValidateWholeBean component = (UIValidateWholeBean) c;
-        
+
         Class[] validationGroupArray = component.getValidationGroupsArray();
         Set result = null;
-        try {
-            result = beanValidator.validate(valCopy, validationGroupArray);
+        try {       
+            result = beanValidator.validate(valCopy, validationGroupArray);            
         } catch (IllegalArgumentException iae) {
             String failureMessage = "Unable to validate expression " + beanVE.getExpressionString() + " using Bean Validation.  Unable to get value of expression. " + " Message from Bean Validation: " + iae.getMessage();
             LOGGER.fine(failureMessage);
@@ -125,17 +157,17 @@ class WholeBeanValidator implements Validator {
             // Mark the components as invalid to prevent them from receiving
             // values during updateModelValues
             for (Map.Entry<String, Map<String, Object>> cur : candidate.entrySet()) {
-                ((EditableValueHolder)cur.getValue().get("component")).setValid(false);
+                ((EditableValueHolder) cur.getValue().get("component")).setValid(false);
             }
             throw toThrow;
         }
     }
-    
+
     private Object copyObjectAndPopulateWithCandidateValues(ValueExpression beanVE,
-            Object val, 
+            Object val,
             Map<String, Map<String, Object>> candidate) {
         // <editor-fold defaultstate="collapsed">
-        
+
         // Populate the value copy with the validated values from the candidate
         Map<String, Object> propertiesToSet = new HashMap<>();
         for (Map.Entry<String, Map<String, Object>> cur : candidate.entrySet()) {
@@ -146,26 +178,27 @@ class WholeBeanValidator implements Validator {
         Object valCopy = null;
         try {
             NewInstanceCopier nic = new NewInstanceCopier();
-            valCopy = nic.copy(val);
+            valCopy = nic.copy(val);            
+
         } catch (IllegalStateException ise2) {
         }
         if (null == valCopy) {
             if (val instanceof Serializable) {
                 try {
                     SerializationCopier sc = new SerializationCopier();
-                    valCopy = sc.copy(val);
+                    valCopy = sc.copy(val);                    
                 } catch (IllegalStateException ise) {
                 }
             } else if (val instanceof Cloneable) {
                 try {
                     CloneCopier cc = new CloneCopier();
-                    valCopy = cc.copy(val);
+                    valCopy = cc.copy(val);                
                 } catch (IllegalStateException ise) {
                 }
             } else {
                 try {
                     CopyCtorCopier ccc = new CopyCtorCopier();
-                    valCopy = ccc.copy(val);
+                    valCopy = ccc.copy(val);                  
                 } catch (IllegalStateException ise) {
                 }
             }
@@ -173,13 +206,13 @@ class WholeBeanValidator implements Validator {
         if (null == valCopy) {
             throw new FacesException("Unable to copy value from " + beanVE.getExpressionString());
         }
-        
+
         ReflectionUtils.setProperties(valCopy, propertiesToSet);
         return valCopy;
-        
+
         // </editor-fold>
     }
-    
+
     private javax.validation.Validator getBeanValidator(FacesContext context) {
         // <editor-fold defaultstate="collapsed">
         ValidatorFactory validatorFactory;
@@ -227,5 +260,5 @@ class WholeBeanValidator implements Validator {
         }
     }
     // </editor-fold>
-    
+
 }

@@ -40,11 +40,14 @@
 
 package com.sun.faces.ext.component;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import javax.faces.FacesException;
 import javax.faces.component.PartialStateHolder;
+import javax.faces.component.UIComponent;
+import javax.faces.component.UIForm;
 import javax.faces.context.FacesContext;
 import javax.faces.component.UIInput;
 import javax.faces.convert.Converter;
@@ -54,13 +57,17 @@ import javax.faces.validator.Validator;
 import javax.validation.groups.Default;
 
 public class UIValidateWholeBean extends UIInput implements PartialStateHolder {
-    
+
+    private static final String ERROR_MISSING_FORM
+            = "f:validateWholeBean must be nested directly in an UIForm.";
+
     public static final String FAMILY = "com.sun.faces.ext.validateWholeBean";
-    
+
     private transient Class[] cachedValidationGroups;
     private transient String validationGroups = "";
-    
+
     private enum PropertyKeys {
+
         ValidatorInstalled
     }
 
@@ -69,27 +76,27 @@ public class UIValidateWholeBean extends UIInput implements PartialStateHolder {
     public String getFamily() {
         return FAMILY;
     }
-    
+
     @Override
     public Object getSubmittedValue() {
         return getFamily();
     }
-    
+
     @Override
     public void setConverter(Converter converter) {
     }
-    
+
     @Override
-    public final void addValidator(Validator validator) {
+    public final void addValidator(Validator validator) {        
         if (validator instanceof WholeBeanValidator) {
             super.addValidator(validator);
             setValidatorInstalled(true);
         }
     }
     // </editor-fold>
-    
+
     // <editor-fold defaultstate="collapsed" desc="tag attributes">
-    public void setValidationGroups(String validationGroups) {
+    public void setValidationGroups(String validationGroups) {        
         clearInitialState();
         String newValidationGroups = validationGroups;
         // treat empty list as null
@@ -109,14 +116,13 @@ public class UIValidateWholeBean extends UIInput implements PartialStateHolder {
         this.validationGroups = newValidationGroups;
     }
 
-    public String getValidationGroups() {
+    public String getValidationGroups() {        
         return validationGroups;
     }
 
     // </editor-fold>
-
     @Override
-    public void validate(FacesContext context) {
+    public void validate(FacesContext context) {        
         if (!wholeBeanValidationEnabled(context)) {
             return;
         }
@@ -124,21 +130,33 @@ public class UIValidateWholeBean extends UIInput implements PartialStateHolder {
         if (!isValidatorInstalled()) {
             WholeBeanValidator validator = new WholeBeanValidator();
             addValidator(validator);
-        }
+        }        
         super.validate(context);
     }
-    
+
+    @Override
+    public void encodeBegin(FacesContext context) throws IOException {
+	
+        // check if the parent of this f:validateWholeBean is a form                   
+        UIComponent parent = getParent();
+        if (!(parent instanceof UIForm)) {
+            throw new IllegalArgumentException(ERROR_MISSING_FORM);
+        }
+
+        UIForm form = (UIForm) parent;        
+        MultiFieldValidationUtils2.misplacedTagCheck(form, getClientId());
+    }
+
     // <editor-fold defaultstate="collapsed" desc="private helpers">
-    private boolean isValidatorInstalled() {
+    private boolean isValidatorInstalled() {        
         return (Boolean) getStateHelper().eval(PropertyKeys.ValidatorInstalled, false);
     }
-    
-    private void setValidatorInstalled(boolean newValue) {
+
+    private void setValidatorInstalled(boolean newValue) {        
         getStateHelper().put(PropertyKeys.ValidatorInstalled, newValue);
     }
 
-    
-    Class[] getValidationGroupsArray() {
+    Class[] getValidationGroupsArray() {        
         if (cachedValidationGroups != null) {
             return cachedValidationGroups;
         }
@@ -164,20 +182,18 @@ public class UIValidateWholeBean extends UIInput implements PartialStateHolder {
                 }
             }
         }
-        cachedValidationGroups = validationGroupsList.toArray(new Class[validationGroupsList.size()]);
+        cachedValidationGroups = validationGroupsList.toArray(new Class[validationGroupsList.size()]);        
         return cachedValidationGroups;
     }
-    
-    
+
     private boolean wholeBeanValidationEnabled(FacesContext context) {
-        
-        Map<Object,Object> attrs = context.getAttributes();
-        return ((attrs.containsKey(ENABLE_VALIDATE_WHOLE_BEAN_PARAM_NAME) &&
-                (Boolean)attrs.get(ENABLE_VALIDATE_WHOLE_BEAN_PARAM_NAME)));
+        Map<Object, Object> attrs = context.getAttributes();        
+        return ((attrs.containsKey(ENABLE_VALIDATE_WHOLE_BEAN_PARAM_NAME)
+                && (Boolean) attrs.get(ENABLE_VALIDATE_WHOLE_BEAN_PARAM_NAME)));
+
     }
-    
+
     // </editor-fold>
-    
     // <editor-fold defaultstate="collapsed" desc="state management">
     private boolean initialState;
 
@@ -234,8 +250,6 @@ public class UIValidateWholeBean extends UIInput implements PartialStateHolder {
             Object parentState = values[1];
             super.restoreState(context, parentState);
         }
-    }
+    }    
+}
 
-    // </editor-fold>
-    
-}  
